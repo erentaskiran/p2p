@@ -3,10 +3,13 @@ import threading
 import time
 import json
 from typing import List, Dict
+import asyncio
+from websockets.sync.server import serve
 
 class P2PNode:
-    def __init__(self, port: int = 5000):
+    def __init__(self, port: int = 5000, web_socket_port: int = 8765):
         self.port = port
+        self.web_socket_port = web_socket_port
         self.peers: List[str] = []
         self.running = True
         
@@ -24,10 +27,14 @@ class P2PNode:
         # Start discovery and communication threads
         self.discovery_thread = threading.Thread(target=self._discovery_listener)
         self.comm_thread = threading.Thread(target=self._communication_listener)
+        self.web_socket_thread = threading.Thread(target = self._web_socket_server)
         self.discovery_thread.start()
         self.comm_thread.start()
+        self.web_socket_thread.start()
         
         print(f"P2P Node started on port {port}")
+        print(f"Websocket server started on port {web_socket_port}")
+
     
     def _discovery_listener(self):
         """Listen for peer discovery messages"""
@@ -56,7 +63,15 @@ class P2PNode:
                 
             except Exception as e:
                 print(f"Discovery error: {e}")
-    
+
+    def _web_socket_server(self):
+        with serve(self.echo, "localhost", 8765) as server:
+            server.serve_forever()
+
+        
+    def echo(websocket):
+            for message in websocket:
+                websocket.send(message)
     def _communication_listener(self):
         """Listen for peer-to-peer communication"""
         while self.running:
