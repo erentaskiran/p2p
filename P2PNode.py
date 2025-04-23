@@ -22,7 +22,10 @@ class P2PNode:
         print(f"WebSocket server started on port {web_socket_port}")
 
     def start_websocket_server(self):
-        """WebSocket server kodu buraya eklenebilir"""
+        """WebSocket server kodu buraya eklenebilir"""  
+        pass
+    def stop(self):
+        """WebSocket server'ı durdurma kodu buraya eklenebilir"""  
         pass
 
 if __name__ == "__main__":
