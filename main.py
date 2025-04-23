@@ -4,7 +4,8 @@ import time
 import json
 from typing import List, Dict
 import asyncio
-from websockets.sync.server import serve
+import websockets
+import netifaces  # For dynamically determining the local network range
 
 class P2PNode:
     def __init__(self, port: int = 5000, web_socket_port: int = 8765):
@@ -15,7 +16,9 @@ class P2PNode:
         
         # Discovery socket for finding other peers
         self.discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
         self.discovery_socket.bind(('0.0.0.0', port))
         
         # Communication socket for peer-to-peer messaging
@@ -27,7 +30,7 @@ class P2PNode:
         # Start discovery and communication threads
         self.discovery_thread = threading.Thread(target=self._discovery_listener)
         self.comm_thread = threading.Thread(target=self._communication_listener)
-        self.web_socket_thread = threading.Thread(target = self._web_socket_server)
+        self.web_socket_thread = threading.Thread(target=lambda: asyncio.run(self._web_socket_server()))
         self.discovery_thread.start()
         self.comm_thread.start()
         self.web_socket_thread.start()
@@ -35,7 +38,6 @@ class P2PNode:
         print(f"P2P Node started on port {port}")
         print(f"Websocket server started on port {web_socket_port}")
 
-    
     def _discovery_listener(self):
         """Listen for peer discovery messages"""
         while self.running:
@@ -48,13 +50,13 @@ class P2PNode:
                     response = {
                         'type': 'peer_info',
                         'port': self.port,
-                        'ip': socket.gethostbyname(socket.gethostname())
+                        'ip': addr[0]  # Use the sender's IP address directly
                     }
                     self.discovery_socket.sendto(
                         json.dumps(response).encode(),
                         addr
                     )
-                    
+                        
                     # Add new peer if not already in our list
                     peer_addr = f"{addr[0]}:{message['port']}"
                     if peer_addr not in self.peers:
@@ -64,14 +66,14 @@ class P2PNode:
             except Exception as e:
                 print(f"Discovery error: {e}")
 
-    def _web_socket_server(self):
-        with serve(self.echo, "localhost", 8765) as server:
-            server.serve_forever()
+    async def _web_socket_server(self):
+        async with websockets.serve(self.echo, "localhost", self.web_socket_port):
+            await asyncio.Future()  # Run forever
 
-        
-    def echo(websocket):
-            for message in websocket:
-                websocket.send(message)
+    async def echo(self, websocket, path):
+        async for message in websocket:
+            await websocket.send(message)
+
     def _communication_listener(self):
         """Listen for peer-to-peer communication"""
         while self.running:
@@ -102,15 +104,21 @@ class P2PNode:
             'port': self.port
         }
         
-        # Broadcast to all possible local network addresses
-        for i in range(1, 255):
-            try:
-                self.discovery_socket.sendto(
-                    json.dumps(message).encode(),
-                    (f'192.168.1.{i}', self.port)
-                )
-            except Exception as e:
-                pass
+        # Get the local network broadcast address
+        try:
+            interfaces = netifaces.interfaces()
+            for interface in interfaces:
+                ifaddresses = netifaces.ifaddresses(interface)
+                if netifaces.AF_INET in ifaddresses:
+                    for link in ifaddresses[netifaces.AF_INET]:
+                        if 'broadcast' in link:
+                            broadcast_ip = link['broadcast']
+                            self.discovery_socket.sendto(
+                                json.dumps(message).encode(),
+                                (broadcast_ip, self.port)
+                            )
+        except Exception as e:
+            print(f"Error broadcasting discovery message: {e}")
     
     def send_to_peer(self, peer_addr: str, message: Dict):
         """Send a message to a specific peer"""
