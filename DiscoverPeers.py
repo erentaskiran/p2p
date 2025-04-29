@@ -24,17 +24,22 @@ class DiscoverPeers:
             interfaces = netifaces.interfaces()
             for interface in interfaces:
                 ifaddresses = netifaces.ifaddresses(interface)
-                if netifaces.AF_INET in ifaddresses:
-                    for link in ifaddresses[netifaces.AF_INET]:
-                        if 'broadcast' in link:
-                            broadcast_ip = link['broadcast']
+                inet_info = ifaddresses.get(netifaces.AF_INET, [])
+
+                for link in inet_info:
+                    broadcast_ip = link.get('broadcast')
+                    if broadcast_ip:
+                        try:
                             self.discovery_socket.sendto(
                                 json.dumps(message).encode(),
                                 (broadcast_ip, self.port)
                             )
-            print("Broadcasting discovery message to local network.")
+                            print(f"Discovery message sent to {broadcast_ip}:{self.port}")
+                        except Exception as send_err:
+                            print(f"Error sending to {broadcast_ip}: {send_err}")
+            print("Finished broadcasting discovery messages.")
         except Exception as e:
-            print(f"Error broadcasting discovery message: {e}")
+            print(f"Error during interface scan or broadcast: {e}")
 
     def listen_for_peers(self):
         """Listen for peer discovery messages"""
@@ -68,4 +73,5 @@ class DiscoverPeers:
         #
         while True:
             self.discover_peers()
-            threading.Event().wait(5) 
+            time.sleep(2)
+
