@@ -3,6 +3,7 @@ import json
 import netifaces
 from typing import List, Dict
 import threading
+import time
 
 class DiscoverPeers:
     def __init__(self, port: int):
@@ -20,26 +21,28 @@ class DiscoverPeers:
             'port': self.port
         }
 
-        try:
-            interfaces = netifaces.interfaces()
-            for interface in interfaces:
-                ifaddresses = netifaces.ifaddresses(interface)
-                inet_info = ifaddresses.get(netifaces.AF_INET, [])
+        while True:
+            try:
+                interfaces = netifaces.interfaces()
+                for interface in interfaces:
+                    ifaddresses = netifaces.ifaddresses(interface)
+                    inet_info = ifaddresses.get(netifaces.AF_INET, [])
 
-                for link in inet_info:
-                    broadcast_ip = link.get('broadcast')
-                    if broadcast_ip:
-                        try:
-                            self.discovery_socket.sendto(
-                                json.dumps(message).encode(),
-                                (broadcast_ip, self.port)
-                            )
-                            print(f"Discovery message sent to {broadcast_ip}:{self.port}")
-                        except Exception as send_err:
-                            print(f"Error sending to {broadcast_ip}: {send_err}")
-            print("Finished broadcasting discovery messages.")
-        except Exception as e:
-            print(f"Error during interface scan or broadcast: {e}")
+                    for link in inet_info:
+                        broadcast_ip = link.get('broadcast')
+                        if broadcast_ip:
+                            try:
+                                self.discovery_socket.sendto(
+                                    json.dumps(message).encode(),
+                                    (broadcast_ip, self.port)
+                                )
+                                print(f"Discovery message sent to {broadcast_ip}:{self.port}")
+                            except Exception as send_err:
+                                print(f"Error sending to {broadcast_ip}: {send_err}")
+                print("Finished broadcasting discovery messages.")
+            except Exception as e:
+                print(f"Error during interface scan or broadcast: {e}")
+            time.sleep(2)
 
     def listen_for_peers(self):
         """Listen for peer discovery messages"""
@@ -70,8 +73,5 @@ class DiscoverPeers:
     def start_discovery(self):
         """Start discovery in a separate thread"""
         threading.Thread(target=self.listen_for_peers, daemon=True).start()
-        #
-        while True:
-            self.discover_peers()
-            time.sleep(2)
 
+        threading.Thread(target=self.discover_peers, daemon=True).start()
