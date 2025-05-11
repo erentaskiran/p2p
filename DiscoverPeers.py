@@ -4,6 +4,8 @@ import netifaces
 from typing import List, Dict
 import threading
 import time
+import pathlib
+import os
 
 class DiscoverPeers:
     def __init__(self, port: int):
@@ -75,3 +77,62 @@ class DiscoverPeers:
         threading.Thread(target=self.listen_for_peers, daemon=True).start()
 
         threading.Thread(target=self.discover_peers, daemon=True).start()
+        asd = self.list_all_file_paths("./paylasilacak_dosyalar/")
+        print(asd)
+
+    def list_of_peer_accordingly_to_ips(self, file_name, files) -> List[str]:
+        """List peers according to their IPs"""
+        message = {
+            'type': 'peer_file_info',
+            'port': self.port,
+            'file_name': file_name
+        }
+
+        ips = []
+
+        try:
+            interfaces = netifaces.interfaces()
+            for interface in interfaces:
+                ifaddresses = netifaces.ifaddresses(interface)
+                inet_info = ifaddresses.get(netifaces.AF_INET, [])
+
+                for link in inet_info:
+                    broadcast_ip = link.get('broadcast')
+                    if broadcast_ip:
+                        try:
+                            self.discovery_socket.sendto(
+                                json.dumps(message).encode(),
+                                (broadcast_ip, self.port)
+                            )
+                            print(f"Discovery message sent to {broadcast_ip}:{self.port}")
+                        except Exception as send_err:
+                            print(f"Error sending to {broadcast_ip}: {send_err}")
+        except Exception as e:
+            print(f"Error during interface scan or broadcast: {e}")
+        
+        tm = time.time()
+        while tm + 2 > time.time():
+            try:
+                data, addr = self.discovery_socket.recvfrom(1024)
+                message = json.loads(data.decode())
+                
+                if message['type'] == 'peer_file_info':
+                    if message['file_name'] in files:
+                        response = {
+                            'type': 'peer_file_info_answer',
+                            'port': self.port,
+                            'ip': addr[0]  
+                        }
+                        self.discovery_socket.sendto(
+                            json.dumps(response).encode(),
+                            addr
+                        )
+                        peer_addr = f"{addr[0]}:{message['port']}"
+                        if peer_addr not in self.peers:
+                            self.peers.append(peer_addr)
+                            print(f"Peer added: {peer_addr}")
+                elif message['type'] == 'peer_file_info_answer':
+                    ips.append(message['ip'])
+            except Exception as e:
+                print(f"Discovery error: {e}")
+        return ips
