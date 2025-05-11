@@ -5,6 +5,9 @@ import socket
 import asyncio
 import websockets
 from FileManager import FileServer, FileClient
+import hashlib
+import os
+
 
 class P2PNode:
     def __init__(self, port: int = 5003, web_socket_port: int = 8765):
@@ -12,8 +15,8 @@ class P2PNode:
         self.web_socket_port = web_socket_port
 
         self.peers = []  
-        self.files = []  
-        self.files = self.list_all_file_paths("paylasilacak_dosyalar")
+        self.files = {}  
+        self.files = self.list_all_files("paylasilacak_dosyalar")
 
         self.peer_discovery = DiscoverPeers(self.port)
 
@@ -68,13 +71,27 @@ class P2PNode:
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")
 
-    def receive_file_from_peer(self, filename):
+    def receive_file_from_peer(self, filename, files):
         """Dosya alma fonksiyonu"""
-        ips = self.peer_discovery.list_of_peer_accordingly_to_ips(self.files)
+        ip, fileHash = self.peer_discovery.list_of_peer_accordingly_to_ips(self.files)
+        recieved = self.peer_discovery.receive_file(ip, fileHash, self.files)
 
-    def list_all_file_paths(self, directory):
-        file_names = []
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                file_names.append(file)
-        return file_names
+
+
+    def list_all_files(self, directory):
+        files = {}
+        for root, _, filenames in os.walk(directory):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                tmp = self.hash_file(file_path)
+                files[tmp] = file_path
+        return files
+
+    def hash_file(self, filepath):
+        sha256_hash = hashlib.sha256()
+
+        with open(filepath, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+
+        return sha256_hash.hexdigest()

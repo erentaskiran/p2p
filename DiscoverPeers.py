@@ -77,8 +77,6 @@ class DiscoverPeers:
         threading.Thread(target=self.listen_for_peers, daemon=True).start()
 
         threading.Thread(target=self.discover_peers, daemon=True).start()
-        asd = self.list_all_file_paths("./paylasilacak_dosyalar/")
-        print(asd)
 
     def list_of_peer_accordingly_to_ips(self, file_name, files) -> List[str]:
         """List peers according to their IPs"""
@@ -88,7 +86,7 @@ class DiscoverPeers:
             'file_name': file_name
         }
 
-        ips = []
+        ip = ""
 
         try:
             interfaces = netifaces.interfaces()
@@ -110,6 +108,7 @@ class DiscoverPeers:
         except Exception as e:
             print(f"Error during interface scan or broadcast: {e}")
         
+        tmpHash = ""
         tm = time.time()
         while tm + 2 > time.time():
             try:
@@ -117,11 +116,12 @@ class DiscoverPeers:
                 message = json.loads(data.decode())
                 
                 if message['type'] == 'peer_file_info':
-                    if message['file_name'] in files:
+                    if message['file_name'] in [file.rsplit('/', 1)[-1] for file in files.values()]:
                         response = {
                             'type': 'peer_file_info_answer',
                             'port': self.port,
-                            'ip': addr[0]  
+                            'ip': addr[0],  
+                            "file_hash": self.get_key_by_value(files, message['file_name'])
                         }
                         self.discovery_socket.sendto(
                             json.dumps(response).encode(),
@@ -132,7 +132,68 @@ class DiscoverPeers:
                             self.peers.append(peer_addr)
                             print(f"Peer added: {peer_addr}")
                 elif message['type'] == 'peer_file_info_answer':
-                    ips.append(message['ip'])
+                    if message['file_hash'] == tmpHash:
+                        ips.append(message['ip'])
+                        tmpHash = message['file_hash']
+                        break
             except Exception as e:
                 print(f"Discovery error: {e}")
-        return ips
+        return (ip, tmpHash)
+
+    def receive_file(self, ip, fileHash, files):
+        message = {
+            'type': 'recieve_file',
+            'port': self.port,
+            'file_hash': fileHash
+        } 
+
+        try:
+            self.discovery_socket.sendto(
+                json.dumps(message).encode(),
+                (ip, self.port)
+            )
+            print(f"File request sent to {ip}:{self.port}")
+        except Exception as send_err:
+            print(f"Error sending to {ip}: {send_err}")
+        
+        tm = time.time()
+        while tm + 2 > time.time():
+            try:
+                data, addr = self.discovery_socket.recvfrom(1024)
+                message = json.loads(data.decode())
+                
+                if message['type'] == 'file_data' and message['file_hash'] == fileHash:
+                    fileFormat = message['file_format']
+                    fileName = message['file_name']
+
+                    with open(f"{fileName}.{fileFormat}", 'wb') as f:
+                        f.write(message['data'].encode())
+                    print(f"File received from {addr[0]}:{message['port']}")
+                    break
+                elif message['type'] == "recieve_file":
+                    fileHash = message['file_hash']
+                    fileName = files[fileHash]
+                    fileFormat = fileName.split('.')[-1]
+                    
+                    with open(f"{fileName}", 'r') as f:
+                        data = f.read()
+                    message = {
+                        'type': 'file_data',
+                        'port': self.port,
+                        'file_hash': fileHash,
+                        'file_name': fileName.rsplit('/', 1)[-1],
+                        'file_format': fileFormat,
+                        'data': data
+                    }
+                    self.discovery_socket.sendto(
+                        json.dumps(message).encode(),
+                        (ip, self.port)
+                    )
+            except Exception as e:
+                print(f"File receive error: {e}")
+
+    def get_key_by_value(self,d, target_value):
+        for key, value in d.items():
+            if value == target_value:
+                return key
+        return None
