@@ -137,7 +137,12 @@ class DiscoverPeers:
                     print(message)
                 elif message['type'] == "receive_file" and 'file_hash' in message: # Corrected typo
                     file_hash_to_send = message['file_hash']
-                    logger.info(f"Received 'receive_file' request for hash {file_hash_to_send} from {addr}")
+                    requester_ip = addr[0]
+                    # Port where the requester expects the file data, from the 'receive_file' message
+                    requester_reply_port = message.get('port')
+
+                    logger.info(f"Received 'receive_file' request for hash {file_hash_to_send} from {requester_ip}:{addr[1]}. Requester expects data on port {requester_reply_port}.")
+                    
                     if file_hash_to_send in self.local_files:
                         file_path_to_send = self.local_files[file_hash_to_send]
                         file_name_to_send = os.path.basename(file_path_to_send)
@@ -152,14 +157,22 @@ class DiscoverPeers:
 
                             data_message = {
                                 'type': 'file_data',
-                                'port': self.port,
+                                'port': self.port, # This node's discovery port (sender of the file_data)
                                 'file_hash': file_hash_to_send,
                                 'file_name': file_name_to_send,
                                 'file_format': file_format,
                                 'data': file_data_encoded
                             }
-                            self.discovery_socket.sendto(json.dumps(data_message).encode(), addr)
-                            logger.info(f"Sent file data for {file_name_to_send} to {addr[0]}:{addr[1]}")
+
+                            if requester_reply_port:
+                                # Send the file data to the requester's IP and their specified listening port
+                                reply_address = (requester_ip, requester_reply_port)
+                                self.discovery_socket.sendto(json.dumps(data_message).encode(), reply_address)
+                                logger.info(f"Sent file data for {file_name_to_send} to {reply_address[0]}:{reply_address[1]}")
+                            else:
+                                logger.error(f"Cannot send file {file_name_to_send}: 'port' not specified in 'receive_file' message from {requester_ip}:{addr[1]}.")
+                                # Original problematic line was: self.discovery_socket.sendto(json.dumps(data_message).encode(), addr)
+                                # logger.info(f"Sent file data for {file_name_to_send} to {addr[0]}:{addr[1]}")
                         except FileNotFoundError:
                             logger.error(f"File not found for sending: {file_path_to_send}")
                         except Exception as e:
