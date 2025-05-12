@@ -206,10 +206,23 @@ class DiscoverPeers:
     def find_file_source(self, requested_filename: str) -> tuple[str | None, int | None, str | None]: # MODIFIED return type
         """Broadcasts a query for a file and returns the (IP, Port, file_hash) of a peer that has it.""" # MODIFIED docstring
         logger.info(f"Searching for file source: {requested_filename}")
+
+        response_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        response_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            response_socket.bind(('0.0.0.0', 0)) # Bind to an ephemeral port
+        except Exception as e:
+            logger.error(f"Error binding temporary response socket for find_file_source: {e}", exc_info=True)
+            response_socket.close() # Ensure socket is closed on bind error
+            return None, None, None
+            
+        reply_to_port = response_socket.getsockname()[1]
+        logger.debug(f"find_file_source listening for response on temporary port {reply_to_port}")
+
         message = {
             'type': 'query_file',
             'filename': requested_filename,
-            'reply_port': self.port
+            'reply_port': reply_to_port # Use the ephemeral port for replies
         }
         encoded_message = json.dumps(message).encode()
 
@@ -235,23 +248,23 @@ class DiscoverPeers:
 
         for bcast_ip in set(broadcast_addresses):
             try:
+                # Send from the main discovery_socket, but expect reply on response_socket
                 self.discovery_socket.sendto(encoded_message, (bcast_ip, self.port))
-                logger.debug(f"File query for '{requested_filename}' sent to {bcast_ip}:{self.port}")
+                logger.debug(f"File query for '{requested_filename}' sent to {bcast_ip}:{self.port}, reply expected on port {reply_to_port}")
             except Exception as send_err:
                 logger.warning(f"Error sending file query to {bcast_ip}: {send_err}")
         
         start_time = time.time()
         timeout_duration = 3
         
-        original_timeout = self.discovery_socket.gettimeout()
-        self.discovery_socket.settimeout(0.5)
+        response_socket.settimeout(0.5) # Set timeout on the response socket
 
         try:
             while time.time() - start_time < timeout_duration:
                 try:
-                    data, addr = self.discovery_socket.recvfrom(1024)
+                    data, addr = response_socket.recvfrom(1024) # Use response_socket to receive
                     response = json.loads(data.decode())
-                    logger.debug(f"Received response while searching for file: {response} from {addr}")
+                    logger.debug(f"Received response while searching for file: {response} from {addr} on temp port {reply_to_port}")
                     
                     if response.get('type') == 'file_found_response' and \
                        response.get('filename') == requested_filename:
@@ -260,10 +273,9 @@ class DiscoverPeers:
                         peer_port = response.get('port') # Get the sender's discovery port
                         if peer_port is None:
                             logger.warning(f"File_found_response from {peer_ip} for '{requested_filename}' did not include a port.")
-                            # Optionally, could try addr[1] if it's a direct response, but less reliable for discovery port
                             return None, None, None 
                         logger.info(f"Found file '{requested_filename}' at {peer_ip}:{peer_port} with hash {file_hash}")
-                        return peer_ip, peer_port, file_hash # MODIFIED return
+                        return peer_ip, peer_port, file_hash 
                 except socket.timeout:
                     continue
                 except json.JSONDecodeError:
@@ -273,10 +285,11 @@ class DiscoverPeers:
                     logger.error(f"Error receiving file_found_response: {e}", exc_info=True)
                     continue
         finally:
-            self.discovery_socket.settimeout(original_timeout)
+            response_socket.close()
+            logger.debug(f"Closed temporary response socket on port {reply_to_port} for find_file_source")
 
         logger.warning(f"File '{requested_filename}' not found on the network after {timeout_duration}s.")
-        return None, None, None # MODIFIED return
+        return None, None, None
 
     def query_peer_for_file(self, target_peer_address_str: str, requested_filename: str) -> tuple[str | None, int | None, str | None]: # MODIFIED return type
         """Queries a specific peer for a file and returns (IP, Port, file_hash) if found.""" # MODIFIED docstring
@@ -289,101 +302,123 @@ class DiscoverPeers:
             logger.error(f"Invalid peer address format: {target_peer_address_str}. Expected IP:PORT")
             return None, None, None
 
+        response_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        response_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            response_socket.bind(('0.0.0.0', 0)) # Bind to an ephemeral port
+        except Exception as e:
+            logger.error(f"Error binding temporary response socket for query_peer_for_file: {e}", exc_info=True)
+            response_socket.close()
+            return None, None, None
+
+        reply_to_port = response_socket.getsockname()[1]
+        logger.debug(f"query_peer_for_file listening for response on temporary port {reply_to_port}")
+
         message = {
             'type': 'query_file',
             'filename': requested_filename,
-            'reply_port': self.port  # The port this node is listening on for discovery messages
+            'reply_port': reply_to_port  # The port this node is listening on for this specific query's response
         }
         encoded_message = json.dumps(message).encode()
 
         try:
+            # Send from the main discovery_socket
             self.discovery_socket.sendto(encoded_message, (target_ip, target_port))
-            logger.debug(f"File query for '{requested_filename}' sent to {target_ip}:{target_port}")
+            logger.debug(f"File query for '{requested_filename}' sent to {target_ip}:{target_port}, reply expected on port {reply_to_port}")
         except Exception as send_err:
             logger.warning(f"Error sending file query to {target_ip}:{target_port}: {send_err}")
+            response_socket.close() 
             return None, None, None
         
-        # Listen for a response from this specific peer
         start_time = time.time()
-        # Shorter timeout as we are querying a specific peer
         timeout_duration = 2  
         
-        original_timeout = self.discovery_socket.gettimeout()
-        # Non-blocking with short timeout
-        self.discovery_socket.settimeout(0.2) 
+        response_socket.settimeout(0.2) # Set timeout on the response socket
 
         try:
             while time.time() - start_time < timeout_duration:
                 try:
-                    data, addr = self.discovery_socket.recvfrom(1024)
-                    # Check if the response is from the queried peer
-                    if addr[0] == target_ip and addr[1] == target_port: # Check sender port as well if it's fixed or known
+                    data, addr = response_socket.recvfrom(1024) # Use response_socket to receive
+                    
+                    if addr[0] == target_ip: 
                         response = json.loads(data.decode())
-                        logger.debug(f"Received response while querying {target_peer_address_str}: {response} from {addr}")
+                        logger.debug(f"Received response while querying {target_peer_address_str}: {response} from {addr} on temp port {reply_to_port}")
                         
                         if response.get('type') == 'file_found_response' and \
                            response.get('filename') == requested_filename:
-                            # The peer_ip in the response should ideally be the sender's IP (addr[0])
-                            # or an IP the sender explicitly states it can be reached on for file transfer.
-                            # For simplicity, we'll use addr[0] if 'peer_ip' is not in response,
-                            # but it's better if the response confirms its serving IP.
                             peer_ip_from_response = response.get('peer_ip', addr[0])
                             file_hash = response.get('file_hash')
-                            peer_port_from_response = response.get('port') # Get the sender's discovery port
+                            peer_port_from_response = response.get('port') 
                             if peer_port_from_response is None:
                                 logger.warning(f"File_found_response from {target_peer_address_str} for '{requested_filename}' did not include a port.")
                                 return None, None, None
                             logger.info(f"Peer {target_peer_address_str} has file '{requested_filename}' (IP: {peer_ip_from_response}, Port: {peer_port_from_response}, Hash: {file_hash})")
-                            return peer_ip_from_response, peer_port_from_response, file_hash # MODIFIED return
+                            return peer_ip_from_response, peer_port_from_response, file_hash 
                 except socket.timeout:
-                    # No data received, continue listening or timeout
                     continue
                 except json.JSONDecodeError:
                     logger.warning(f"JSON decode error while querying {target_peer_address_str} from {addr[0] if 'addr' in locals() else 'unknown'}")
                     continue
                 except Exception as e:
                     logger.error(f"Error receiving response from {target_peer_address_str}: {e}", exc_info=True)
-                    # Break on other errors to avoid busy-looping on a problematic peer
                     break 
         finally:
-            self.discovery_socket.settimeout(original_timeout)
+            response_socket.close()
+            logger.debug(f"Closed temporary response socket on port {reply_to_port} for query_peer_for_file")
 
         logger.info(f"File '{requested_filename}' not found on peer {target_peer_address_str} or no response.")
-        return None, None, None # MODIFIED return
+        return None, None, None
 
     def receive_file(self, peer_ip: str, peer_port: int, file_hash: str, destination_path: str) -> bool: # MODIFIED signature
         """
         Requests a file from a specific peer and saves it to destination_path.
         This now handles receiving base64 encoded data.
         """
-        # MODIFIED log to include peer_port
         logger.info(f"Requesting file with hash {file_hash} from {peer_ip}:{peer_port} to be saved at {destination_path}")
+
+        response_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        response_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            response_socket.bind(('0.0.0.0', 0)) # Bind to an ephemeral port for receiving the file
+        except Exception as e:
+            logger.error(f"Error binding temporary response socket for receive_file: {e}", exc_info=True)
+            response_socket.close()
+            return False
+            
+        reply_to_port = response_socket.getsockname()[1]
+        logger.debug(f"receive_file listening for file data on temporary port {reply_to_port}")
+
         request_message = {
             'type': 'receive_file', 
             'file_hash': file_hash,
-            'port': self.port # This is the requester's discovery port, for the sender to reply to
+            'port': reply_to_port # This is the requester's ephemeral port, for the sender to reply to with file data
         }
         
         try:
-            # MODIFIED: Send the request to the peer's IP and their specific discovery port
+            # Send the request from the main discovery_socket to the peer's known discovery port
             self.discovery_socket.sendto(json.dumps(request_message).encode(), (peer_ip, peer_port))
+            logger.debug(f"Sent 'receive_file' request to {peer_ip}:{peer_port} for hash {file_hash}, expecting data on port {reply_to_port}")
         except Exception as e:
-            # MODIFIED log to include peer_port
             logger.error(f"Error sending file request to {peer_ip}:{peer_port}: {e}", exc_info=True)
+            response_socket.close() 
             return False
 
         start_time = time.time()
-        timeout_duration = 10
+        timeout_duration = 10 
         
-        original_timeout = self.discovery_socket.gettimeout()
-        self.discovery_socket.settimeout(1.0)
+        response_socket.settimeout(1.0) # Set timeout on the response_socket
 
         try:
             while time.time() - start_time < timeout_duration:
                 try:
-                    data, addr = self.discovery_socket.recvfrom(65535)
+                    data, addr = response_socket.recvfrom(65535) 
+                    
+                    if addr[0] != peer_ip:
+                        logger.warning(f"Received data from unexpected IP {addr[0]} while expecting file from {peer_ip} on port {reply_to_port}. Ignoring.")
+                        continue
+
                     response = json.loads(data.decode())
-                    logger.debug(f"Received data while waiting for file: {response.get('type')} from {addr}")
+                    logger.debug(f"Received data while waiting for file: {response.get('type')} from {addr} on temp port {reply_to_port}")
 
                     if response.get('type') == 'file_data' and response.get('file_hash') == file_hash:
                         logger.info(f"Received file_data for hash {file_hash} from {addr[0]}")
@@ -410,11 +445,12 @@ class DiscoverPeers:
                     continue
                 except Exception as e:
                     logger.error(f"Error receiving file data: {e}", exc_info=True)
-                    return False
+                    return False 
         finally:
-            self.discovery_socket.settimeout(original_timeout)
+            response_socket.close()
+            logger.debug(f"Closed temporary response socket on port {reply_to_port} for receive_file")
 
-        logger.warning(f"Timeout or error receiving file {file_hash} from {peer_ip}.")
+        logger.warning(f"Timeout or error receiving file {file_hash} from {peer_ip}:{peer_port}.")
         return False
 
     def get_key_by_value(self,d, target_value_basename):
