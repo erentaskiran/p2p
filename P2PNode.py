@@ -18,7 +18,8 @@ class P2PNode:
         self.files = {}  
         self.files = self.list_all_files("paylasilacak_dosyalar")
 
-        self.peer_discovery = DiscoverPeers(self.port)
+        # DiscoverPeers'ı self.files ile başlat
+        self.peer_discovery = DiscoverPeers(self.port, self.files)
 
         # FileManager'ı entegre et
         self.file_server = FileServer(host="localhost", port=5001)  # Dosya sunucusunu başlat
@@ -62,7 +63,7 @@ class P2PNode:
 
                 if message.startswith("receive_file:"):
                     filename = message.split(":")[1]
-                    self.receive_file_from_peer(filename)
+                    self.receive_file_from_peer(filename) # Updated call due to signature change
                 else:
                     print(f"Unknown command: {message}")
                     # Echo the message back to the client
@@ -71,12 +72,54 @@ class P2PNode:
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")
 
-    def receive_file_from_peer(self, filename, files):
-        """Dosya alma fonksiyonu"""
-        ip, fileHash = self.peer_discovery.list_of_peer_accordingly_to_ips(self.files)
-        recieved = self.peer_discovery.receive_file(ip, fileHash, self.files)
+    # Eski imza: def receive_file_from_peer(self, filename, files)
+    def receive_file_from_peer(self, requested_filename: str):
+        """
+        İstenilen dosyayı ağdaki bir peer'dan alır.
+        Bu fonksiyon, DiscoverPeers sınıfında `find_file_source(filename)` gibi bir metodun
+        var olduğunu varsayar (bu metod peer_ip, file_hash döndürmelidir).
+        Ayrıca, `receive_file(peer_ip, file_hash, destination_path)` metodunun dosyayı
+        belirtilen yola indirdiğini varsayar.
+        """
+        print(f"İstenen dosyayı alma denemesi: {requested_filename}")
 
+        # find_file_source metodu DiscoverPeers.py içinde uygulandı.
+        source_info = self.peer_discovery.find_file_source(requested_filename)
 
+        if source_info and source_info[0] and source_info[1]:
+            peer_ip, file_hash_on_peer = source_info
+            print(f"Dosya bulundu: {requested_filename} (hash: {file_hash_on_peer}) peer üzerinde: {peer_ip}")
+
+            download_directory = "indirilen_dosyalar" # İndirilen dosyalar için klasör adı
+            # İndirme dizininin var olduğundan emin olun
+            if not os.path.exists(download_directory):
+                try:
+                    os.makedirs(download_directory)
+                    print(f"Dizin oluşturuldu: {download_directory}")
+                except OSError as e:
+                    print(f"Dizin oluşturulamadı {download_directory}: {e}")
+                    return # İndirme dizini olmadan devam edilemez
+
+            destination_path = os.path.join(download_directory, requested_filename)
+
+            print(f"{peer_ip} adresinden {requested_filename} dosyası {destination_path} konumuna isteniyor")
+            
+            # `self.peer_discovery.receive_file` çağrısındaki üçüncü argüman `self.files` (bir dict) idi,
+            # bu bir hedef yolu için yanlıştır. Düzeltilmiş çağrı:
+            try:
+                success = self.peer_discovery.receive_file(peer_ip, file_hash_on_peer, destination_path)
+                if success:
+                    print(f"{requested_filename} başarıyla alındı ve {destination_path} konumuna kaydedildi.")
+                    # İsteğe bağlı: İndirilen dosyayı yerel paylaşılan dosyalara ekle
+                    # new_file_hash = self.hash_file(destination_path)
+                    # self.files[new_file_hash] = destination_path
+                    # print(f"{requested_filename} yerel dosyalara eklendi ve paylaşıma açıldı.")
+                else:
+                    print(f"{requested_filename} dosyası {peer_ip} adresinden alınamadı.")
+            except Exception as e:
+                print(f"{requested_filename} dosyası {peer_ip} adresinden alınırken hata oluştu: {e}")
+        else:
+            print(f"{requested_filename} dosyası ağda bulunamadı.")
 
     def list_all_files(self, directory):
         files = {}
