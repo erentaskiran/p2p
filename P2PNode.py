@@ -87,15 +87,33 @@ class P2PNode:
     def receive_file_from_peer(self, requested_filename: str):
         """
         İstenilen dosyayı ağdaki bir peer'dan alır.
-        Bu fonksiyon, DiscoverPeers sınıfında `find_file_source(filename)` gibi bir metodun
-        var olduğunu varsayar (bu metod peer_ip, file_hash döndürmelidir).
-        Ayrıca, `receive_file(peer_ip, file_hash, destination_path)` metodunun dosyayı
-        belirtilen yola indirdiğini varsayar.
+        Artık broadcast yapmak yerine bilinen peer'ları doğrudan sorgular.
         """
-        logger.info(f"Attempting to receive file: {requested_filename}")
+        logger.info(f"Attempting to receive file by querying known peers: {requested_filename}")
 
-        # find_file_source metodu DiscoverPeers.py içinde uygulandı.
-        source_info = self.peer_discovery.find_file_source(requested_filename)
+        source_info = None
+        # self.peer_discovery.peers listesindeki her bir peer için sorgulama yap
+        # Peer adresleri "IP:PORT" formatında olmalı
+        if not self.peer_discovery.peers:
+            logger.warning("No known peers to query for the file.")
+            # Fallback to broadcast if no peers are known, or handle as an error
+            # For now, we'll just log and exit if no peers are known.
+            # Alternatively, you could call find_file_source here as a fallback.
+            # logger.info(f"No peers known, falling back to broadcast for {requested_filename}")
+            # source_info = self.peer_discovery.find_file_source(requested_filename)
+            return
+
+        for peer_address_str in self.peer_discovery.peers:
+            logger.info(f"Querying peer {peer_address_str} for {requested_filename}")
+            # query_peer_for_file metodu DiscoverPeers.py içinde eklendi.
+            # Bu metod (peer_ip, file_hash) döndürmelidir.
+            potential_source = self.peer_discovery.query_peer_for_file(peer_address_str, requested_filename)
+            if potential_source and potential_source[0] and potential_source[1]:
+                source_info = potential_source
+                logger.info(f"File {requested_filename} found with peer {peer_address_str}")
+                break # Dosyayı ilk bulan peer'dan al
+            else:
+                logger.info(f"Peer {peer_address_str} does not have {requested_filename} or did not respond.")
 
         if source_info and source_info[0] and source_info[1]:
             peer_ip, file_hash_on_peer = source_info

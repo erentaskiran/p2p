@@ -240,6 +240,75 @@ class DiscoverPeers:
         logger.warning(f"File '{requested_filename}' not found on the network after {timeout_duration}s.")
         return None, None
 
+    def query_peer_for_file(self, target_peer_address_str: str, requested_filename: str) -> tuple[str | None, str | None]:
+        """Queries a specific peer for a file and returns (IP, file_hash) if found."""
+        logger.info(f"Querying peer {target_peer_address_str} for file: {requested_filename}")
+        
+        try:
+            target_ip, target_port_str = target_peer_address_str.split(':')
+            target_port = int(target_port_str)
+        except ValueError:
+            logger.error(f"Invalid peer address format: {target_peer_address_str}. Expected IP:PORT")
+            return None, None
+
+        message = {
+            'type': 'query_file',
+            'filename': requested_filename,
+            'reply_port': self.port  # The port this node is listening on for discovery messages
+        }
+        encoded_message = json.dumps(message).encode()
+
+        try:
+            self.discovery_socket.sendto(encoded_message, (target_ip, target_port))
+            logger.debug(f"File query for '{requested_filename}' sent to {target_ip}:{target_port}")
+        except Exception as send_err:
+            logger.warning(f"Error sending file query to {target_ip}:{target_port}: {send_err}")
+            return None, None
+        
+        # Listen for a response from this specific peer
+        start_time = time.time()
+        # Shorter timeout as we are querying a specific peer
+        timeout_duration = 2  
+        
+        original_timeout = self.discovery_socket.gettimeout()
+        # Non-blocking with short timeout
+        self.discovery_socket.settimeout(0.2) 
+
+        try:
+            while time.time() - start_time < timeout_duration:
+                try:
+                    data, addr = self.discovery_socket.recvfrom(1024)
+                    # Check if the response is from the queried peer
+                    if addr[0] == target_ip and addr[1] == target_port: # Check sender port as well if it's fixed or known
+                        response = json.loads(data.decode())
+                        logger.debug(f"Received response while querying {target_peer_address_str}: {response} from {addr}")
+                        
+                        if response.get('type') == 'file_found_response' and \
+                           response.get('filename') == requested_filename:
+                            # The peer_ip in the response should ideally be the sender's IP (addr[0])
+                            # or an IP the sender explicitly states it can be reached on for file transfer.
+                            # For simplicity, we'll use addr[0] if 'peer_ip' is not in response,
+                            # but it's better if the response confirms its serving IP.
+                            peer_ip_from_response = response.get('peer_ip', addr[0])
+                            file_hash = response.get('file_hash')
+                            logger.info(f"Peer {target_peer_address_str} has file '{requested_filename}' (IP: {peer_ip_from_response}, Hash: {file_hash})")
+                            return peer_ip_from_response, file_hash
+                except socket.timeout:
+                    # No data received, continue listening or timeout
+                    continue
+                except json.JSONDecodeError:
+                    logger.warning(f"JSON decode error while querying {target_peer_address_str} from {addr[0] if 'addr' in locals() else 'unknown'}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error receiving response from {target_peer_address_str}: {e}", exc_info=True)
+                    # Break on other errors to avoid busy-looping on a problematic peer
+                    break 
+        finally:
+            self.discovery_socket.settimeout(original_timeout)
+
+        logger.info(f"File '{requested_filename}' not found on peer {target_peer_address_str} or no response.")
+        return None, None
+
     def receive_file(self, peer_ip: str, file_hash: str, destination_path: str) -> bool:
         """
         Requests a file from a specific peer and saves it to destination_path.
