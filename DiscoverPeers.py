@@ -72,6 +72,7 @@ class DiscoverPeers:
                 sender_port = message.get('port', addr[1])
                 logger.debug(f"Received message: {message} from {sender_ip}:{sender_port}")
 
+                print(f"Received message: {message} from {sender_ip}:{sender_port}")
                 if message['type'] == 'discover':
                     response = {
                         'type': 'peer_info',
