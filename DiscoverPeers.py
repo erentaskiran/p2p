@@ -115,6 +115,8 @@ class DiscoverPeers:
                     else:
                         logger.info(f"File '{requested_filename}' not found locally.")
 
+                elif message['type'] == "recieve_file":
+                    print(message)
                 elif message['type'] == "recieve_file" and 'file_hash' in message:
                     file_hash_to_send = message['file_hash']
                     logger.info(f"Received 'recieve_file' request for hash {file_hash_to_send} from {addr}")
