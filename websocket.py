@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import websockets
 import json
@@ -11,12 +12,15 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from P2PNode import P2PNode # For type hinting, avoids circular import at runtime
+    shared_p2p_node_instance: P2PNode | Any
+else:
+    shared_p2p_node_instance = None
 
 logger = logging.getLogger(__name__)
 
 # This will be set by the main application (e.g., P2PNode)
 # shared_discover_peers_instance: DiscoverPeers = None # Old
-shared_p2p_node_instance: 'P2PNode' | Any = None # New: P2PNode instance
+# shared_p2p_node_instance: 'P2PNode' | Any = None # New: P2PNode instance
 
 async def handle_message(websocket, path):
     """
@@ -158,7 +162,7 @@ async def handle_message(websocket, path):
         logger.info(f"Connection with {client_address} closed.")
 
 
-async def start_websocket_server_main(host, port, p2p_node_instance: 'P2PNode' | Any):
+async def start_websocket_server_main(host, port, p2p_node_instance: P2PNode | Any):
     """
     Starts the WebSocket server and keeps it running.
     Now accepts a P2PNode instance.
@@ -175,7 +179,7 @@ async def start_websocket_server_main(host, port, p2p_node_instance: 'P2PNode' |
         logger.info(f"WebSocket server started on ws://{host}:{port}")
         await asyncio.Future()  # Run forever
 
-def run_server(p2p_node_instance: 'P2PNode' | Any, host='localhost', port=8765):
+def run_server(p2p_node_instance: P2PNode | Any, host='localhost', port=8765):
     """
     Utility function to run the WebSocket server.
     Accepts a P2PNode instance.
