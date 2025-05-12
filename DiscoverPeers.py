@@ -195,8 +195,10 @@ class DiscoverPeers:
             broadcast_addresses.append("255.255.255.255")
 
         if not broadcast_addresses:
-             logger.warning("No broadcast addresses found, using 255.255.255.255")
+             logger.warning("No broadcast addresses found by netifaces, using 255.255.255.255 as a fallback.")
              broadcast_addresses.append("255.255.255.255")
+        
+        logger.info(f"Attempting to broadcast file query to the following addresses: {list(set(broadcast_addresses))}")
 
         for bcast_ip in set(broadcast_addresses):
             try:
