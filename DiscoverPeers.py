@@ -72,7 +72,6 @@ class DiscoverPeers:
                 sender_port = message.get('port', addr[1])
                 logger.debug(f"Received message: {message} from {sender_ip}:{sender_port}")
 
-                print(f"Received message: {message} from {sender_ip}:{sender_port}")
                 if message['type'] == 'discover':
                     response = {
                         'type': 'peer_info',
@@ -134,11 +133,11 @@ class DiscoverPeers:
                     else:
                         logger.info(f"File '{requested_filename}' not found locally.")
 
-                elif message['type'] == "recieve_file":
+                elif message['type'] == "receive_file": # Corrected typo
                     print(message)
-                elif message['type'] == "recieve_file" and 'file_hash' in message:
+                elif message['type'] == "receive_file" and 'file_hash' in message: # Corrected typo
                     file_hash_to_send = message['file_hash']
-                    logger.info(f"Received 'recieve_file' request for hash {file_hash_to_send} from {addr}")
+                    logger.info(f"Received 'receive_file' request for hash {file_hash_to_send} from {addr}")
                     if file_hash_to_send in self.local_files:
                         file_path_to_send = self.local_files[file_hash_to_send]
                         file_name_to_send = os.path.basename(file_path_to_send)
@@ -337,7 +336,7 @@ class DiscoverPeers:
         """
         logger.info(f"Requesting file with hash {file_hash} from {peer_ip}:{self.port} to be saved at {destination_path}")
         request_message = {
-            'type': 'recieve_file',
+            'type': 'receive_file', # Corrected typo
             'file_hash': file_hash,
             'port': self.port
         }
