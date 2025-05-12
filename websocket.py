@@ -5,25 +5,31 @@ import os
 import base64
 import logging
 import pathlib # Added for standalone testing path
-from DiscoverPeers import DiscoverPeers
+# from DiscoverPeers import DiscoverPeers # No longer directly needed here for shared instance
+import threading # Added for running downloads in a separate thread
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from P2PNode import P2PNode # For type hinting, avoids circular import at runtime
 
 logger = logging.getLogger(__name__)
 
 # This will be set by the main application (e.g., P2PNode)
-shared_discover_peers_instance: DiscoverPeers = None
+# shared_discover_peers_instance: DiscoverPeers = None # Old
+shared_p2p_node_instance: 'P2PNode' | Any = None # New: P2PNode instance
 
 async def handle_message(websocket, path):
     """
     Handles incoming WebSocket messages.
     """
-    global shared_discover_peers_instance
+    global shared_p2p_node_instance
     client_address = websocket.remote_address
     logger.info(f"Client connected from {client_address}")
 
-    if not shared_discover_peers_instance:
-        logger.error("DiscoverPeers instance not available to WebSocket server.")
-        await websocket.send(json.dumps({"error": "Server not properly configured (no DiscoverPeers instance)."}))
-        await websocket.close()
+    if not shared_p2p_node_instance:
+        logger.error("P2PNode instance not available to WebSocket server.")
+        await websocket.send(json.dumps({"error": "Server not properly configured (no P2PNode instance)."}))
+        await websocket.close(code=1011, reason="Server configuration error")
         return
 
     try:
@@ -47,20 +53,55 @@ async def handle_message(websocket, path):
 
             if command == "receive_file":
                 requested_filename = payload
-                logger.info(f"WebSocket request from {client_address} for receive_file: {requested_filename}")
+                logger.info(f"WebSocket request from {client_address} to trigger download of: {requested_filename}")
+                
+                try:
+                    # Run P2PNode's receive_file_from_peer in a new thread to avoid blocking asyncio loop
+                    download_thread = threading.Thread(
+                        target=shared_p2p_node_instance.receive_file_from_peer,
+                        args=(requested_filename,)
+                    )
+                    download_thread.daemon = True # Ensure thread doesn't prevent exit
+                    download_thread.start()
+                    
+                    response_message = {"status": "download_initiated", "filename": requested_filename}
+                    await websocket.send(json.dumps(response_message))
+                    logger.info(f"Download process for '{requested_filename}' initiated in a new thread for {client_address}.")
+                
+                except Exception as e:
+                    logger.error(f"Error initiating download for '{requested_filename}' via WebSocket command: {e}", exc_info=True)
+                    await websocket.send(json.dumps({"error": f"Failed to initiate download for '{requested_filename}'.", "details": str(e)}))
 
+            elif command == "get_local_files_info": # New command to list files this node serves via WS (original receive_file behavior)
+                logger.info(f"WebSocket request from {client_address} for get_local_files_info")
+                # This uses the P2PNode's peer_discovery component which holds local_files
+                local_files_info = []
+                if hasattr(shared_p2p_node_instance, 'peer_discovery') and shared_p2p_node_instance.peer_discovery:
+                    for f_hash, f_path_str in shared_p2p_node_instance.peer_discovery.local_files.items():
+                        local_files_info.append({
+                            "filename": os.path.basename(f_path_str),
+                            "hash": f_hash,
+                            "path": f_path_str # Be cautious about exposing full paths
+                        })
+                    await websocket.send(json.dumps({"type": "local_files_list", "files": local_files_info}))
+                else:
+                    await websocket.send(json.dumps({"error": "Could not retrieve local files information."}))
+            
+            elif command == "serve_file": # New command for a WS client to request a file directly from this node's local_files
+                requested_filename_to_serve = payload
+                logger.info(f"WebSocket request from {client_address} to serve_file: {requested_filename_to_serve}")
                 found_file_path = None
                 file_hash_to_send = None
 
-                # Access local_files from the shared DiscoverPeers instance
-                for f_hash, f_path_str in shared_discover_peers_instance.local_files.items():
-                    if os.path.basename(f_path_str) == requested_filename:
-                        found_file_path = f_path_str
-                        file_hash_to_send = f_hash
-                        break
+                if hasattr(shared_p2p_node_instance, 'peer_discovery') and shared_p2p_node_instance.peer_discovery:
+                    for f_hash, f_path_str in shared_p2p_node_instance.peer_discovery.local_files.items():
+                        if os.path.basename(f_path_str) == requested_filename_to_serve:
+                            found_file_path = f_path_str
+                            file_hash_to_send = f_hash
+                            break
                 
                 if found_file_path and file_hash_to_send:
-                    logger.info(f"File '{requested_filename}' found locally at '{found_file_path}' with hash {file_hash_to_send} for {client_address}.")
+                    logger.info(f"File '{requested_filename_to_serve}' found locally at '{found_file_path}' with hash {file_hash_to_send} for {client_address}.")
                     try:
                         with open(found_file_path, 'rb') as f:
                             file_data_bytes = f.read()
@@ -78,22 +119,24 @@ async def handle_message(websocket, path):
                         }
                         await websocket.send(json.dumps(response_message))
                         logger.info(f"Sent file data for '{file_name_to_send}' to {client_address} over WebSocket.")
-
                     except FileNotFoundError:
                         logger.error(f"File not found error for: {found_file_path} (requested by {client_address})")
-                        await websocket.send(json.dumps({"error": f"File '{requested_filename}' found in manifest but not on disk."}))
+                        await websocket.send(json.dumps({"error": f"File '{requested_filename_to_serve}' found in manifest but not on disk."}))
                     except Exception as e:
                         logger.error(f"Error reading or sending file {found_file_path} to {client_address}: {e}", exc_info=True)
-                        await websocket.send(json.dumps({"error": f"Error processing file '{requested_filename}'."}))
+                        await websocket.send(json.dumps({"error": f"Error processing file '{requested_filename_to_serve}'."}))
                 else:
-                    logger.warning(f"File '{requested_filename}' not found in local_files for WebSocket request from {client_address}.")
-                    await websocket.send(json.dumps({"status": "file_not_found_locally", "filename": requested_filename}))
-            
-            elif command == "discover_peers": # Example of another command
-                peers = shared_discover_peers_instance.peers
-                await websocket.send(json.dumps({"type": "peer_list", "peers": peers}))
-                logger.info(f"Sent peer list to {client_address}: {peers}")
+                    logger.warning(f"File '{requested_filename_to_serve}' not found in local_files for WebSocket request from {client_address}.")
+                    await websocket.send(json.dumps({"status": "file_not_found_locally", "filename": requested_filename_to_serve}))
 
+            elif command == "discover_peers":
+                if hasattr(shared_p2p_node_instance, 'peer_discovery') and shared_p2p_node_instance.peer_discovery:
+                    peers = shared_p2p_node_instance.peer_discovery.peers
+                    await websocket.send(json.dumps({"type": "peer_list", "peers": peers}))
+                    logger.info(f"Sent peer list to {client_address}: {peers}")
+                else:
+                    await websocket.send(json.dumps({"error": "Could not retrieve peer list."}))
+                    logger.warning(f"Peer discovery component not available for discover_peers command from {client_address}")
             else:
                 logger.warning(f"Unknown command '{command}' from {client_address}")
                 await websocket.send(json.dumps({"error": f"Unknown command: {command}"}))
@@ -106,46 +149,45 @@ async def handle_message(websocket, path):
         logger.error(f"Error in WebSocket handler for {client_address}: {e}", exc_info=True)
         if websocket.open:
             try:
+                # Send a generic error and close with 1011 if an unhandled exception occurs
                 await websocket.send(json.dumps({"error": "An unexpected server error occurred."}))
+                await websocket.close(code=1011, reason="Unhandled server error")
             except websockets.exceptions.ConnectionClosed:
                 pass # Client already gone
     finally:
         logger.info(f"Connection with {client_address} closed.")
 
 
-async def start_websocket_server_main(host, port, discover_peers_instance: DiscoverPeers):
+async def start_websocket_server_main(host, port, p2p_node_instance: 'P2PNode' | Any):
     """
     Starts the WebSocket server and keeps it running.
+    Now accepts a P2PNode instance.
     """
-    global shared_discover_peers_instance
-    shared_discover_peers_instance = discover_peers_instance
+    global shared_p2p_node_instance
+    shared_p2p_node_instance = p2p_node_instance
     
-    if not shared_discover_peers_instance:
-        logger.critical("Cannot start WebSocket server: DiscoverPeers instance is None.")
+    if not shared_p2p_node_instance:
+        logger.critical("Cannot start WebSocket server: P2PNode instance is None.")
         return
 
     logger.info(f"Attempting to start WebSocket server on {host}:{port}...")
-    # Set a higher max_size if you expect to send large files
-    # For example, max_size=10*1024*1024 for 10MB
-    async with websockets.serve(handle_message, host, port, max_size=None): # max_size=None for unlimited, or set a specific limit
+    async with websockets.serve(handle_message, host, port, max_size=None): 
         logger.info(f"WebSocket server started on ws://{host}:{port}")
         await asyncio.Future()  # Run forever
 
-def run_server(discover_peers_instance: DiscoverPeers, host='localhost', port=8765):
+def run_server(p2p_node_instance: 'P2PNode' | Any, host='localhost', port=8765):
     """
     Utility function to run the WebSocket server.
-    This should be called from your main application script (e.g., P2PNode.py).
+    Accepts a P2PNode instance.
     """
     try:
-        asyncio.run(start_websocket_server_main(host, port, discover_peers_instance))
+        asyncio.run(start_websocket_server_main(host, port, p2p_node_instance))
     except KeyboardInterrupt:
         logger.info("WebSocket server shutting down due to KeyboardInterrupt...")
     except OSError as e:
         logger.error(f"Failed to start WebSocket server on {host}:{port}. Error: {e}")
         if "Address already in use" in str(e):
             logger.error("The port is likely already in use by another application or an old instance of this server.")
-        # Exit or handle as appropriate for your application
-        # For now, just re-raising to make it visible
         raise
     except Exception as e:
         logger.critical(f"An unexpected error occurred while trying to run the WebSocket server: {e}", exc_info=True)
@@ -153,49 +195,45 @@ def run_server(discover_peers_instance: DiscoverPeers, host='localhost', port=87
 
 
 if __name__ == '__main__':
-    # This is a minimal setup for standalone testing of websocket.py.
-    # In a real application, DiscoverPeers would be initialized by P2PNode or main.py
-    # with actual local files and manifest.
-    
-    # Setup basic logging for standalone test
+    # This standalone test block needs a P2PNode instance to run correctly with the new design.
+    # For simplicity, we'll just log that it's a test and would require P2PNode.
     logging.basicConfig(level=logging.INFO, 
                         format='%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(message)s')
     logger.info("Starting WebSocket server for standalone testing...")
+    logger.warning("Standalone test mode for websocket.py is limited without a full P2PNode instance.")
+    logger.warning("To test fully, integrate with P2PNode.py or create a mock P2PNode here.")
 
-    # Create a dummy DiscoverPeers instance for testing
-    # Ensure 'paylasilacak_dosyalar' directory and 'test.txt' exist for this to work fully.
-    current_script_dir = pathlib.Path(__file__).parent
-    test_shared_dir = current_script_dir / "paylasilacak_dosyalar"
-    test_file_name = "test.txt"
-    test_file_path = test_shared_dir / test_file_name
+    # Example of how it might be mocked (very basic):
+    class MockP2PNode:
+        def __init__(self):
+            self.peer_discovery = self.MockDiscoverPeers()
+            self.files = {} # Mock files
+            logger.info("MockP2PNode initialized for standalone WebSocket test.")
+
+        def receive_file_from_peer(self, filename):
+            logger.info(f"[MockP2PNode] Request to download file: {filename}")
+            # Simulate download initiation
+            logger.info(f"[MockP2PNode] Simulated download for {filename} initiated.")
+            # In a real scenario, this would interact with the network.
+
+        class MockDiscoverPeers:
+            def __init__(self):
+                self.local_files = {"hash_of_test.txt": "paylasilacak_dosyalar/test.txt"}
+                self.peers = ["mock_peer1:12345", "mock_peer2:54321"]
+                logger.info("MockDiscoverPeers initialized for standalone WebSocket test.")
+                # Ensure dummy file exists for serve_file testing
+                test_shared_dir = pathlib.Path(__file__).parent / "paylasilacak_dosyalar"
+                test_file_path = test_shared_dir / "test.txt"
+                if not test_shared_dir.exists(): test_shared_dir.mkdir(parents=True, exist_ok=True)
+                if not test_file_path.exists():
+                    with open(test_file_path, "w") as f: f.write("Test content for standalone WS.")
+                    logger.info(f"Created dummy file: {test_file_path}")
+
+
+    mock_node = MockP2PNode()
     
-    # Create dummy file and directory if they don't exist for testing
-    if not test_shared_dir.exists():
-        logger.info(f"Creating dummy shared directory: {test_shared_dir}")
-        test_shared_dir.mkdir(parents=True, exist_ok=True)
-    if not test_file_path.exists():
-        logger.info(f"Creating dummy file for testing: {test_file_path}")
-        with open(test_file_path, "w") as f:
-            f.write("This is a test file for WebSocket standalone testing.")
-    
-    dummy_local_files = {}
-    if test_file_path.exists():
-        # Using a simple hash for testing (filename itself for simplicity here)
-        # In a real scenario, this hash would come from your manifest/file hashing logic
-        dummy_local_files = { f"hash_of_{test_file_name}": str(test_file_path) }
-    else:
-        logger.warning(f"Test file {test_file_path} could not be found or created for standalone test.")
-
-
-    # Dummy port for DiscoverPeers, not actually used for UDP discovery in this standalone WS test
-    # The local_files dictionary is the important part for the 'receive_file' command.
     try:
-        dp_instance = DiscoverPeers(port=12345, local_files=dummy_local_files)
-        logger.info(f"Dummy DiscoverPeers instance created with local_files: {dp_instance.local_files}")
-        
-        # Ensure the shared instance is set for the handler
-        shared_discover_peers_instance = dp_instance 
-
-        run_server(discover_peers_instance=dp_instance, host='localhost', port=8765)
+        # Pass the mock P2PNode instance
+        run_server(p2p_node_instance=mock_node, host='localhost', port=8765)
     except Exception as e:
-        logger.critical(f"Failed to initialize and run standalone WebSocket server: {e}", exc_info=True)
+        logger.critical(f"Failed to initialize and run standalone WebSocket server with mock: {e}", exc_info=True)

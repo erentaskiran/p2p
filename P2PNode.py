@@ -34,7 +34,7 @@ class P2PNode:
         # It needs the DiscoverPeers instance to access local_files
         self.web_socket_thread = threading.Thread(
             target=run_websocket_server,
-            args=(self.peer_discovery, "localhost", self.web_socket_port),
+            args=(self, "localhost", self.web_socket_port), # Pass self (P2PNode instance)
             daemon=True
         )
         self.web_socket_thread.start()
