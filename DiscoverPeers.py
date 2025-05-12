@@ -95,7 +95,12 @@ class DiscoverPeers:
                 
                 elif message['type'] == 'query_file':
                     requested_filename = message['filename']
-                    logger.info(f"Received query_file for '{requested_filename}' from {sender_ip}:{addr[1]}")
+                    sender_ip = addr[0] # IP of the node that sent the query_file message
+                    original_sender_port = addr[1] # Ephemeral port from which the query was sent
+                    
+                    # Log received query, including the port sender expects a reply on
+                    logger.info(f"Received query_file for '{requested_filename}' from {sender_ip}:{original_sender_port} (reply to port: {message.get('reply_port')})")
+                    
                     found_file_hash = None
                     for f_hash, f_path in self.local_files.items():
                         if os.path.basename(f_path) == requested_filename:
@@ -108,10 +113,23 @@ class DiscoverPeers:
                             'type': 'file_found_response',
                             'filename': requested_filename,
                             'file_hash': found_file_hash,
-                            'peer_ip': self.get_local_ip(),
-                            'port': self.port
+                            'peer_ip': self.get_local_ip(), # This node's IP
+                            'port': self.port             # This node's discovery port
                         }
-                        self.discovery_socket.sendto(json.dumps(response).encode(), addr)
+                        
+                        # Determine the correct address to send the response to
+                        reply_to_port = message.get('reply_port')
+                        if reply_to_port:
+                            # Send to the IP of the querier and the port they specified for replies
+                            response_addr = (sender_ip, reply_to_port)
+                            logger.debug(f"Sending file_found_response to {response_addr} (using reply_port from message)")
+                        else:
+                            # Fallback: if reply_port is not in the message, send back to the original sender address.
+                            # This might happen with older clients or malformed messages.
+                            response_addr = addr 
+                            logger.warning(f"reply_port not found in query_file message from {sender_ip}. Responding to original sender port {original_sender_port}.")
+                        
+                        self.discovery_socket.sendto(json.dumps(response).encode(), response_addr)
                     else:
                         logger.info(f"File '{requested_filename}' not found locally.")
 
