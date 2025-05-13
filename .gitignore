@@ -1,1 +1,4 @@
-./__pycache__
+./python-backend/__pycache__
+./venv
+./electron-frontend/package-lock.json
+./electron-frontend/node_modules

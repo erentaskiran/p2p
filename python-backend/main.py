@@ -1,13 +1,11 @@
-import threading
 from P2PNode import P2PNode
-from ManifestManager import ManifestManager
 import time
 
 if __name__ == "__main__":
 
     node = P2PNode()
     
-    directory_path = "paylasilacak_dosyalar"
+    directory_path = "test"
     
     try:
         while True:
