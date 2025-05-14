@@ -7,6 +7,7 @@ import time
 import pathlib
 import os
 import logging
+import base64
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -164,15 +165,19 @@ class DiscoverPeers:
                                 'data': file_data_encoded
                             }
 
+                            data_payload_bytes = json.dumps(data_message).encode()
+                            payload_size = len(data_payload_bytes)
+                            logger.info(f"Attempting to send file_data payload of size: {payload_size} bytes for {file_name_to_send} to {requester_ip}:{requester_reply_port}")
+                            if payload_size > 60000: # Warn if payload is large for UDP
+                                logger.warning(f"Payload size {payload_size} for {file_name_to_send} is very large for a single UDP packet and may cause transmission failure. Consider implementing chunking for robust transfer.")
+
                             if requester_reply_port:
                                 # Send the file data to the requester's IP and their specified listening port
                                 reply_address = (requester_ip, requester_reply_port)
-                                self.discovery_socket.sendto(json.dumps(data_message).encode(), reply_address)
+                                self.discovery_socket.sendto(data_payload_bytes, reply_address)
                                 logger.info(f"Sent file data for {file_name_to_send} to {reply_address[0]}:{reply_address[1]}")
                             else:
                                 logger.error(f"Cannot send file {file_name_to_send}: 'port' not specified in 'receive_file' message from {requester_ip}:{addr[1]}.")
-                                # Original problematic line was: self.discovery_socket.sendto(json.dumps(data_message).encode(), addr)
-                                # logger.info(f"Sent file data for {file_name_to_send} to {addr[0]}:{addr[1]}")
                         except FileNotFoundError:
                             logger.error(f"File not found for sending: {file_path_to_send}")
                         except Exception as e:
@@ -404,27 +409,28 @@ class DiscoverPeers:
             return False
 
         start_time = time.time()
-        timeout_duration = 10 
+        timeout_duration = 30 # MODIFIED: Increased from 15 to 30 seconds
         
-        response_socket.settimeout(1.0) # Set timeout on the response_socket
+        response_socket.settimeout(2.0) # MODIFIED: Increased from 1.0 to 2.0 seconds
 
         try:
             while time.time() - start_time < timeout_duration:
                 try:
                     data, addr = response_socket.recvfrom(65535) 
+                    logger.debug(f"Received {len(data)} bytes from {addr} while waiting for file on temp port {reply_to_port}")
                     
                     if addr[0] != peer_ip:
-                        logger.warning(f"Received data from unexpected IP {addr[0]} while expecting file from {peer_ip} on port {reply_to_port}. Ignoring.")
+                        logger.warning(f"Received data from unexpected IP {addr[0]} (expected {peer_ip}) while expecting file from {peer_ip} on port {reply_to_port}. Ignoring.")
                         continue
 
                     response = json.loads(data.decode())
-                    logger.debug(f"Received data while waiting for file: {response.get('type')} from {addr} on temp port {reply_to_port}")
+                    logger.debug(f"Received message type: {response.get('type')} from {addr} on temp port {reply_to_port} for hash {file_hash}")
 
                     if response.get('type') == 'file_data' and response.get('file_hash') == file_hash:
                         logger.info(f"Received file_data for hash {file_hash} from {addr[0]}")
                         file_data_encoded = response.get('data')
                         
-                        import base64
+                        
                         try:
                             file_data_bytes = base64.b64decode(file_data_encoded)
                             os.makedirs(os.path.dirname(destination_path), exist_ok=True)

@@ -82,6 +82,7 @@ class P2PNode:
                 # Call DiscoverPeers' receive_file method
                 # Signature: receive_file(self, peer_ip: str, peer_port: int, file_hash: str, destination_path: str)
                 success = self.peer_discovery.receive_file(peer_ip, peer_port, file_hash_on_peer, destination_path)
+                print(success)
                 if success:
                     logger.info(f"'{requested_filename}' received successfully and saved to '{destination_path}'.")
                     # Optionally, add the new file to this node's shared files
