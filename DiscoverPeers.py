@@ -15,17 +15,18 @@ logger = logging.getLogger(__name__)
 
 class DiscoverPeers:
     def __init__(self, port: int, local_files: Dict[str, str]):
-        self.port = port
+        self.discovery_target_port = port  # The port broadcasts should be sent to
+        self.port = port  # Actual port this instance is listening on, may change
         self.discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            self.discovery_socket.bind(('0.0.0.0', port))
+            self.discovery_socket.bind(('0.0.0.0', self.port)) # Use self.port for initial bind attempt
         except OSError as e:
-            logger.error(f"Error binding discovery socket: {e}. Trying random port.")
+            logger.error(f"Error binding discovery socket to {self.port}: {e}. Trying random port.")
             self.discovery_socket.bind(('0.0.0.0', 0))
-            self.port = self.discovery_socket.getsockname()[1]
-            logger.info(f"Bound to new port: {self.port}")
+            self.port = self.discovery_socket.getsockname()[1] # Update self.port to the actual listening port
+            logger.info(f"Bound to new port: {self.port}. Discovery broadcasts will still target: {self.discovery_target_port}")
 
         self.peers: List[str] = []
         self.local_files = local_files
@@ -52,9 +53,9 @@ class DiscoverPeers:
                             try:
                                 self.discovery_socket.sendto(
                                     json.dumps(message).encode(),
-                                    (broadcast_ip, self.port)
+                                    (broadcast_ip, self.discovery_target_port)  # Send to the designated discovery port
                                 )
-                                logger.debug(f"Discovery message sent to {broadcast_ip}:{self.port}")
+                                logger.debug(f"Discovery message sent to {broadcast_ip}:{self.discovery_target_port}")
                             except Exception as send_err:
                                 logger.warning(f"Error sending to {broadcast_ip}: {send_err}")
                 logger.debug("Finished broadcasting discovery messages for this cycle.")
@@ -254,8 +255,8 @@ class DiscoverPeers:
         for bcast_ip in set(broadcast_addresses):
             try:
                 # Send from the main discovery_socket, but expect reply on response_socket
-                self.discovery_socket.sendto(encoded_message, (bcast_ip, self.port))
-                logger.debug(f"File query for '{requested_filename}' sent to {bcast_ip}:{self.port}, reply expected on port {reply_to_port}")
+                self.discovery_socket.sendto(encoded_message, (bcast_ip, self.discovery_target_port)) # Send to the designated discovery port
+                logger.debug(f"File query for '{requested_filename}' sent to {bcast_ip}:{self.discovery_target_port}, reply expected on port {reply_to_port}")
             except Exception as send_err:
                 logger.warning(f"Error sending file query to {bcast_ip}: {send_err}")
         
