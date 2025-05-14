@@ -35,7 +35,7 @@ if __name__ == "__main__":
     
     # Peer 1'in paylaştığı ve Peer 2'nin indirmesini istediğimiz dosyanın adı.
     # Bu dosyanın Peer 1'in "publicFiles" klasöründe olduğundan emin olun.
-    file_to_request = "test.txt" 
+    file_to_request = "asd.xml" 
     # Eğer publicFiles/asd/asd.txt dosyasını istiyorsanız:
     # file_to_request = "asd.txt" 
 

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # shared_discover_peers_instance: DiscoverPeers = None # Old
 # shared_p2p_node_instance: 'P2PNode' | Any = None # New: P2PNode instance
 
-async def handle_message(websocket, path):
+async def handle_message(websocket, path=None):
     """
     Handles incoming WebSocket messages.
     """
