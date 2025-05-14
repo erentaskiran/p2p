@@ -222,16 +222,39 @@ if __name__ == '__main__':
 
         class MockDiscoverPeers:
             def __init__(self):
-                self.local_files = {"hash_of_test.txt": "paylasilacak_dosyalar/test.txt"}
+                # Updated to use publicFiles:
+                test_shared_dir = pathlib.Path(__file__).parent.parent / "publicFiles" # Goes up one level to project root
+                test_file_path = test_shared_dir / "test.txt" # Example file
+                
+                # Ensure the test file exists for the test setup
+                test_shared_dir.mkdir(parents=True, exist_ok=True)
+                if not test_file_path.exists():
+                    try:
+                        with open(test_file_path, 'w') as f:
+                            f.write("This is a test file for P2P sharing.")
+                        logger.info(f"Created test file: {test_file_path}")
+                    except IOError as e:
+                        logger.error(f"Failed to create test file {test_file_path}: {e}")
+                        # Handle error appropriately, maybe exit or skip this part of setup
+
+                if test_file_path.exists():
+                    # A more robust way to get a hash might be needed here
+                    # For simplicity, using filename as part of a pseudo-hash or a fixed hash for test
+                    # In a real app, you would calculate the actual hash of the file content.
+                    # Example: file_hash = hashlib.md5(test_file_path.read_bytes()).hexdigest()
+                    # For this example, let's assume a known hash or derive one simply if not available
+                    # from a more complex system (like ManifestManager)
+                    # Placeholder for actual hash generation:
+                    # This example uses a fixed string, replace with actual hash generation logic.
+                    example_hash = "test_file_hash_placeholder" 
+                    self.local_files = {example_hash: str(test_file_path)}
+                    logger.info(f"Test local files initialized: {self.local_files}")
+                else:
+                    self.local_files = {}
+                    logger.warning(f"Test file {test_file_path} not found. Local files will be empty.")
+
                 self.peers = ["mock_peer1:12345", "mock_peer2:54321"]
                 logger.info("MockDiscoverPeers initialized for standalone WebSocket test.")
-                # Ensure dummy file exists for serve_file testing
-                test_shared_dir = pathlib.Path(__file__).parent / "paylasilacak_dosyalar"
-                test_file_path = test_shared_dir / "test.txt"
-                if not test_shared_dir.exists(): test_shared_dir.mkdir(parents=True, exist_ok=True)
-                if not test_file_path.exists():
-                    with open(test_file_path, "w") as f: f.write("Test content for standalone WS.")
-                    logger.info(f"Created dummy file: {test_file_path}")
 
 
     mock_node = MockP2PNode()

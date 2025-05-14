@@ -20,7 +20,7 @@ class P2PNode:
 
         self.peers = []
         self.files = {}
-        self.files = self.list_all_files("paylasilacak_dosyalar")
+        self.files = self.list_all_files("publicFiles")
         logger.info(f"Indexed files: {self.files}")
 
         self.peer_discovery = DiscoverPeers(self.port, self.files)
@@ -66,7 +66,7 @@ class P2PNode:
             peer_ip, peer_port, file_hash_on_peer = source_info
             logger.info(f"File source found: {requested_filename} (hash: {file_hash_on_peer}) on peer: {peer_ip}:{peer_port}")
 
-            download_directory = "indirilen_dosyalar"
+            download_directory = "publicFiles"
             if not os.path.exists(download_directory):
                 try:
                     os.makedirs(download_directory)

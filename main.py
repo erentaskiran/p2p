@@ -7,7 +7,7 @@ if __name__ == "__main__":
 
     node = P2PNode()
     
-    directory_path = "paylasilacak_dosyalar"
+    directory_path = "publicFiles"
     
     try:
         while True:

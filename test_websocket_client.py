@@ -34,9 +34,9 @@ if __name__ == "__main__":
     downloader_node_websocket_uri = "ws://localhost:8765" 
     
     # Peer 1'in paylaştığı ve Peer 2'nin indirmesini istediğimiz dosyanın adı.
-    # Bu dosyanın Peer 1'in "paylasilacak_dosyalar" klasöründe olduğundan emin olun.
+    # Bu dosyanın Peer 1'in "publicFiles" klasöründe olduğundan emin olun.
     file_to_request = "test.txt" 
-    # Eğer paylasilacak_dosyalar/asd/asd.txt dosyasını istiyorsanız:
+    # Eğer publicFiles/asd/asd.txt dosyasını istiyorsanız:
     # file_to_request = "asd.txt" 
 
     message_to_send = f"receive_file:{file_to_request}"
@@ -50,4 +50,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"An unexpected error occurred in test_websocket_client: {e}", exc_info=True)
 
-logger.info("\nTest complete. Check Node 2's console output and its 'indirilen_dosyalar' directory.")
+logger.info("\nTest complete. Check Node 2's console output and its 'publicFiles' directory.")
