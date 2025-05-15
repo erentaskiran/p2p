@@ -5,7 +5,7 @@ if __name__ == "__main__":
 
     node = P2PNode()
     
-    directory_path = "test"
+    directory_path = "publicFiles"
     
     try:
         while True:
