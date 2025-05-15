@@ -459,9 +459,11 @@ class DiscoverPeers:
         return False
 
     def get_key_by_value(self,d, target_value_basename):
-        """Finds the first key in a dictionary whose filepath value has the target_value_basename."""
+        """Finds the first key in a dictionary whose filepath value has the target_value_basename.
+        The comparison of basenames is now case-insensitive.
+        """
         for key, value_path in d.items():
-            if os.path.basename(value_path) == target_value_basename:
+            if os.path.basename(str(value_path)).lower() == str(target_value_basename).lower():
                 return key
         return None
 

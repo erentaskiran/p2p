@@ -49,53 +49,50 @@ class P2PNode:
 
         logger.info("P2P Node initialized")
 
-    def receive_file_from_peer(self, requested_filename: str):
+    def receive_file_from_peer(self, requested_filename: str, download_directory: str):
         """
         Attempts to receive the specified file from a peer on the network.
-        This method is likely triggered by an external command (e.g., from a CLI or another part of the app),
-        not directly from the WebSocket message 'receive_file:filename' if that's meant for the WS to serve files.
-        If 'receive_file:filename' on WS means THIS node should download, then this logic is fine.
+        Saves the file to the specified download_directory.
+        Returns the full destination path if successful, otherwise None.
         """
-        logger.info(f"Attempting to download file from network: {requested_filename}")
+        logger.info(f"Attempting to download file from network: {requested_filename} to {download_directory}")
 
-        # Use find_file_source to broadcast and find a peer
-        # (IP, Port, file_hash)
         source_info = self.peer_discovery.find_file_source(requested_filename)
 
-        if source_info and source_info[0] and source_info[1] and source_info[2]:
-            peer_ip, peer_port, file_hash_on_peer = source_info
-            logger.info(f"File source found: {requested_filename} (hash: {file_hash_on_peer}) on peer: {peer_ip}:{peer_port}")
-
-            download_directory = "publicFiles"
-            if not os.path.exists(download_directory):
-                try:
-                    os.makedirs(download_directory)
-                    logger.info(f"Created directory: {download_directory}")
-                except OSError as e:
-                    logger.error(f"Could not create directory {download_directory}: {e}")
-                    return
-
-            destination_path = os.path.join(download_directory, requested_filename)
-            logger.info(f"Requesting file {requested_filename} (hash: {file_hash_on_peer}) from {peer_ip}:{peer_port} to {destination_path}")
-
-            try:
-                # Call DiscoverPeers' receive_file method
-                # Signature: receive_file(self, peer_ip: str, peer_port: int, file_hash: str, destination_path: str)
-                success = self.peer_discovery.receive_file(peer_ip, peer_port, file_hash_on_peer, destination_path)
-                print(success)
-                if success:
-                    logger.info(f"'{requested_filename}' received successfully and saved to '{destination_path}'.")
-                    # Optionally, add the new file to this node's shared files
-                    # new_file_hash = self.hash_file(destination_path)
-                    # self.files[new_file_hash] = destination_path
-                    # self.peer_discovery.local_files[new_file_hash] = destination_path # Also update DiscoverPeers's copy
-                    # logger.info(f"'{requested_filename}' added to local shared files.")
-                else:
-                    logger.warning(f"Failed to receive '{requested_filename}' from {peer_ip}:{peer_port}.")
-            except Exception as e:
-                logger.error(f"Error during file reception for '{requested_filename}' from {peer_ip}:{peer_port}: {e}", exc_info=True)
-        else:
+        if not (source_info and source_info[0] and source_info[1] and source_info[2]):
             logger.warning(f"File '{requested_filename}' not found on the network via broadcast.")
+            return None
+
+        peer_ip, peer_port, file_hash_on_peer = source_info
+        logger.info(f"File source found: {requested_filename} (hash: {file_hash_on_peer}) on peer: {peer_ip}:{peer_port}")
+
+        if not os.path.exists(download_directory):
+            try:
+                os.makedirs(download_directory)
+                logger.info(f"Created directory: {download_directory}")
+            except OSError as e:
+                logger.error(f"Could not create directory {download_directory}: {e}")
+                return None
+
+        destination_path = os.path.join(download_directory, requested_filename)
+        logger.info(f"Requesting file {requested_filename} (hash: {file_hash_on_peer}) from {peer_ip}:{peer_port} to {destination_path}")
+
+        try:
+            success = self.peer_discovery.receive_file(peer_ip, peer_port, file_hash_on_peer, destination_path)
+            if success:
+                logger.info(f"'{requested_filename}' received successfully and saved to '{destination_path}'.")
+                # Optionally, add the new file to this node's shared files
+                # new_file_hash = self.hash_file(destination_path)
+                # self.files[new_file_hash] = destination_path
+                # self.peer_discovery.local_files[new_file_hash] = destination_path
+                # logger.info(f"'{requested_filename}' added to local shared files.")
+                return destination_path
+            else:
+                logger.warning(f"Failed to receive '{requested_filename}' from {peer_ip}:{peer_port}.")
+                return None
+        except Exception as e:
+            logger.error(f"Error during file reception for '{requested_filename}' from {peer_ip}:{peer_port}: {e}", exc_info=True)
+            return None
 
     def list_all_files(self, directory):
         files = {}
