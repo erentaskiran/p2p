@@ -1,6 +1,4 @@
-import threading
 from P2PNode import P2PNode
-from ManifestManager import ManifestManager
 import time
 
 if __name__ == "__main__":
