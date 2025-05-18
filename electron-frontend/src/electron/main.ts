@@ -1,30 +1,40 @@
-import electorn from 'electron'
-const { app, BrowserWindow } = electorn
-import * as path from 'path'
+import electron from 'electron'
+const { app, BrowserWindow, ipcMain, dialog } = electron
+import path from 'path'
+import { WebSocket } from 'ws'
 
-const VITE_DEV_SERVER_URL = 'http://localhost:5173'
+let mainWindow: Electron.BrowserWindow | null = null
 
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1000,
-    height: 800,
+  mainWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
     webPreferences: {
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'), // isteğe bağlı
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   })
 
-  win.loadURL(VITE_DEV_SERVER_URL)
+  mainWindow.loadURL('http://localhost:5173') // Vite dev server
 }
 
-app.whenReady().then(() => {
-  createWindow()
+app.whenReady().then(createWindow)
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+ipcMain.handle('select-shared-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
   })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+ipcMain.on('send-download-request', (_event, fileName: string) => {
+  const ws = new WebSocket('ws://localhost:8765')
+  ws.on('open', () => {
+    const msg = `receive_file:${fileName}`
+    ws.send(msg)
+    console.log('WebSocket mesajı gönderildi:', msg)
+    ws.close()
+  })
 })

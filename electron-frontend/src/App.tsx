@@ -1,35 +1,57 @@
-import { useRef } from 'react'
-import axios from 'axios'
+import { useState } from 'react'
+interface ElectronAPI {
+  selectSharedFolder: () => Promise<string | null>;
+  sendDownloadRequest: (fileName: string) => void;
+}
 
+declare global {
+  interface Window {
+    electronAPI: ElectronAPI;
+  }
+}
+
+export {};
 export default function App() {
-  const fileInput = useRef<HTMLInputElement>(null)
+  const [fileName, setFileName] = useState('')
+  const [sharedFolder, setSharedFolder] = useState('')
+  const [status, setStatus] = useState('')
 
-  const handleSend = async () => {
-    const file = fileInput.current?.files?.[0]
-    if (!file) return alert('Lütfen bir dosya seçin.')
-
-    const payload = {
-      sender_id: 'user123',
-      receiver_id: 'user456',
-      file_name: file.name,
-      file_size: file.size,
+  const handleSelectFolder = async () => {
+    const folderPath = await window.electronAPI.selectSharedFolder()
+    if (folderPath) {
+      setSharedFolder(folderPath)
+      setStatus(`📁 Seçilen klasör: ${folderPath}`)
+    } else {
+      setStatus('❌ Klasör seçilmedi.')
     }
+  }
 
-    try {
-      await axios.post('http://localhost:8000/api/transfer', payload)
-      alert('Bilgiler başarıyla gönderildi.')
-    } catch (err) {
-      console.error(err)
-      alert('Gönderim hatası.')
-    }
+  const handleSendRequest = () => {
+    if (!fileName.trim()) return alert('Dosya adı girin.')
+    window.electronAPI.sendDownloadRequest(fileName)
+    setStatus(`📨 İndirme isteği gönderildi: ${fileName}`)
   }
 
   return (
     <div style={{ padding: 40 }}>
-      <h1>P2P Transfer Başlat</h1>
+      <h1>Electron P2P Transfer</h1>
 
-      <input type="file" ref={fileInput} />
-      <button onClick={handleSend}>Gönder</button>
+      <button onClick={handleSelectFolder}>📁 Klasör Seç (İndirilebilir)</button>
+      {sharedFolder && <p>✅ Klasör: {sharedFolder}</p>}
+
+      <input
+        type="text"
+        placeholder="İndirilecek dosya (ör. asd.txt)"
+        value={fileName}
+        onChange={(e) => setFileName(e.target.value)}
+        style={{ marginTop: 20 }}
+      />
+      <br />
+      <button onClick={handleSendRequest} style={{ marginTop: 10 }}>
+        İndirme İsteği Gönder
+      </button>
+
+      {status && <p style={{ marginTop: 20 }}>{status}</p>}
     </div>
   )
 }
