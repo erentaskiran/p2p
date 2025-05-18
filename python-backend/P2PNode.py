@@ -1,9 +1,7 @@
 import logging
 from DiscoverPeers import DiscoverPeers
 import threading
-import time
 from FileManager import FileServer, FileClient
-import hashlib
 import os
 from websocket import run_server as run_websocket_server
 
@@ -20,10 +18,9 @@ class P2PNode:
 
         self.peers = []
         self.files = {}
-        self.files = self.list_all_files("publicFiles")
         logger.info(f"Indexed files: {self.files}")
 
-        self.peer_discovery = DiscoverPeers(self.port, self.files)
+        self.peer_discovery = DiscoverPeers(self.port)
 
         # FileManager integration (FileServer might be for a different protocol or direct TCP transfers)
         # If FileServer is for direct TCP and not WebSocket, it can remain.
@@ -96,21 +93,3 @@ class P2PNode:
                 logger.error(f"Error during file reception for '{requested_filename}' from {peer_ip}:{peer_port}: {e}", exc_info=True)
         else:
             logger.warning(f"File '{requested_filename}' not found on the network via broadcast.")
-
-    def list_all_files(self, directory):
-        files = {}
-        for root, _, filenames in os.walk(directory):
-            for filename in filenames:
-                file_path = os.path.join(root, filename)
-                tmp = self.hash_file(file_path)
-                files[tmp] = file_path
-        return files
-
-    def hash_file(self, filepath):
-        sha256_hash = hashlib.sha256()
-
-        with open(filepath, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
-
-        return sha256_hash.hexdigest()

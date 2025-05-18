@@ -8,13 +8,15 @@ import pathlib
 import os
 import logging
 import base64
+import hashlib
+import time
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class DiscoverPeers:
-    def __init__(self, port: int, local_files: Dict[str, str]):
+    def __init__(self, port: int):
         self.discovery_target_port = port  # The port broadcasts should be sent to
         self.port = port  # Actual port this instance is listening on, may change
         self.discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -29,7 +31,6 @@ class DiscoverPeers:
             logger.info(f"Bound to new port: {self.port}. Discovery broadcasts will still target: {self.discovery_target_port}")
 
         self.peers: List[str] = []
-        self.local_files = local_files
         self.discovery_socket.settimeout(1.0)
 
     def discover_peers(self):
@@ -104,7 +105,8 @@ class DiscoverPeers:
                     logger.info(f"Received query_file for '{requested_filename}' from {sender_ip}:{original_sender_port} (reply to port: {message.get('reply_port')})")
                     
                     found_file_hash = None
-                    for f_hash, f_path in self.local_files.items():
+                    local_files = self.list_all_files("publicFiles")
+                    for f_hash, f_path in local_files.items():
                         if os.path.basename(f_path) == requested_filename:
                             found_file_hash = f_hash
                             break
@@ -143,8 +145,9 @@ class DiscoverPeers:
 
                     logger.info(f"Received 'receive_file' request for hash {file_hash_to_send} from {requester_ip}:{addr[1]}. Requester expects data on port {requester_reply_port}.")
                     
-                    if file_hash_to_send in self.local_files:
-                        file_path_to_send = self.local_files[file_hash_to_send]
+                    local_files = self.list_all_files("publicFiles")
+                    if file_hash_to_send in local_files:
+                        file_path_to_send = local_files[file_hash_to_send]
                         file_name_to_send = os.path.basename(file_path_to_send)
                         file_format = file_name_to_send.split('.')[-1] if '.' in file_name_to_send else ""
                         
@@ -480,3 +483,21 @@ class DiscoverPeers:
             return ip
         except Exception:
             return '127.0.0.1'
+        
+    def list_all_files(self, directory):
+        files = {}
+        for root, _, filenames in os.walk(directory):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                tmp = self.hash_file(file_path)
+                files[tmp] = file_path
+        return files
+
+    def hash_file(self, filepath):
+        sha256_hash = hashlib.sha256()
+
+        with open(filepath, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+
+        return sha256_hash.hexdigest()
