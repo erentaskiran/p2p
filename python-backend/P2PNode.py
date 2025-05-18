@@ -20,10 +20,9 @@ class P2PNode:
 
         self.peers = []
         self.files = {}
-        self.files = self.list_all_files("publicFiles")
         logger.info(f"Indexed files: {self.files}")
 
-        self.peer_discovery = DiscoverPeers(self.port, self.files)
+        self.peer_discovery = DiscoverPeers(self.port)
 
         # FileManager integration (FileServer might be for a different protocol or direct TCP transfers)
         # If FileServer is for direct TCP and not WebSocket, it can remain.
