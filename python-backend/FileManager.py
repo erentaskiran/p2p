@@ -12,12 +12,38 @@ class FileServer:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.public_files_dir = os.path.abspath(os.path.join(script_dir, "publicFiles"))
         
-        # You might want to ensure this directory exists or create it:
-        # if not os.path.isdir(self.public_files_dir):
-        #     os.makedirs(self.public_files_dir, exist_ok=True)
-        # print(f"FileServer: Serving files from '{self.public_files_dir}'")
+        # Ensure the public files directory exists
+        if not os.path.isdir(self.public_files_dir):
+            try:
+                os.makedirs(self.public_files_dir, exist_ok=True)
+                print(f"FileServer: Created public files directory at '{self.public_files_dir}'")
+            except OSError as e:
+                print(f"FileServer: CRITICAL - Failed to create public files directory '{self.public_files_dir}': {e}")
+                # Depending on requirements, you might want to raise an exception here
+                # or set a flag to prevent the server from starting if the directory is crucial.
+        
+        print(f"FileServer: Serving files from '{self.public_files_dir}'")
 
     def send_file(self, requested_filename, conn):
+        # Ensure the public files directory exists, try to create it if not.
+        if not os.path.isdir(self.public_files_dir):
+            try:
+                print(f"FileServer: Public files directory '{self.public_files_dir}' not found. Attempting to recreate.")
+                os.makedirs(self.public_files_dir, exist_ok=True)
+                print(f"FileServer: Successfully recreated public files directory '{self.public_files_dir}'.")
+            except OSError as e:
+                print(f"FileServer: FAILED to recreate public files directory '{self.public_files_dir}': {e}")
+                error_msg = b"ERROR: Server configuration issue (public directory could not be accessed or created)."
+                conn.sendall(error_msg)
+                return
+        
+        # If, after attempting creation, it's still not a directory
+        if not os.path.isdir(self.public_files_dir):
+             print(f"FileServer: CRITICAL - Public files directory '{self.public_files_dir}' is still not accessible after creation attempt.")
+             error_msg = b"ERROR: Server critical issue (public directory state invalid)."
+             conn.sendall(error_msg)
+             return
+
         # Basic sanitization: prevent directory traversal and absolute paths in client request
         if ".." in requested_filename or requested_filename.startswith('/') or requested_filename.startswith('\\'):
             error_msg = b"ERROR: Invalid filename."
@@ -31,6 +57,7 @@ class FileServer:
         abs_file_path = os.path.abspath(prospective_path)
 
         # Security check: Ensure the public_files_dir exists and is a directory
+        # This check is somewhat redundant now given the creation logic above, but kept for safety.
         if not os.path.isdir(self.public_files_dir):
             error_msg = b"ERROR: Server configuration issue (public directory not found)."
             conn.sendall(error_msg)
