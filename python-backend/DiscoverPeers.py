@@ -8,6 +8,8 @@ import pathlib
 import os
 import logging
 import base64
+import hashlib
+import time
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

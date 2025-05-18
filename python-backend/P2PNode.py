@@ -1,9 +1,7 @@
 import logging
 from DiscoverPeers import DiscoverPeers
 import threading
-import time
 from FileManager import FileServer, FileClient
-import hashlib
 import os
 from websocket import run_server as run_websocket_server
 
