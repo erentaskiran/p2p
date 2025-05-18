@@ -96,20 +96,4 @@ class P2PNode:
         else:
             logger.warning(f"File '{requested_filename}' not found on the network via broadcast.")
 
-    def list_all_files(self, directory):
-        files = {}
-        for root, _, filenames in os.walk(directory):
-            for filename in filenames:
-                file_path = os.path.join(root, filename)
-                tmp = self.hash_file(file_path)
-                files[tmp] = file_path
-        return files
 
-    def hash_file(self, filepath):
-        sha256_hash = hashlib.sha256()
-
-        with open(filepath, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
-
-        return sha256_hash.hexdigest()
