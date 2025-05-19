@@ -1,5 +1,0 @@
-./python-backend/__pycache__/*
-./venv
-./python-backend/publicFiles/*
-./electron-frontend/package-lock.json
-./electron-frontend/node_modules
