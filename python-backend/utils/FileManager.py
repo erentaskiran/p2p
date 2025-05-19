@@ -8,24 +8,19 @@ class FileServer:
         self.port = port
         self.running = False
         self.server = None
-        # Determine the base directory for public files, relative to this script file
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.public_files_dir = os.path.abspath(os.path.join(script_dir, "publicFiles"))
         
-        # Ensure the public files directory exists
         if not os.path.isdir(self.public_files_dir):
             try:
-                os.makedirs(self.public_files_dir, exist_ok=True)
+                
                 print(f"FileServer: Created public files directory at '{self.public_files_dir}'")
             except OSError as e:
                 print(f"FileServer: CRITICAL - Failed to create public files directory '{self.public_files_dir}': {e}")
-                # Depending on requirements, you might want to raise an exception here
-                # or set a flag to prevent the server from starting if the directory is crucial.
         
         print(f"FileServer: Serving files from '{self.public_files_dir}'")
 
     def send_file(self, requested_filename, conn):
-        # Ensure the public files directory exists, try to create it if not.
         if not os.path.isdir(self.public_files_dir):
             try:
                 print(f"FileServer: Public files directory '{self.public_files_dir}' not found. Attempting to recreate.")
@@ -37,35 +32,27 @@ class FileServer:
                 conn.sendall(error_msg)
                 return
         
-        # If, after attempting creation, it's still not a directory
         if not os.path.isdir(self.public_files_dir):
              print(f"FileServer: CRITICAL - Public files directory '{self.public_files_dir}' is still not accessible after creation attempt.")
              error_msg = b"ERROR: Server critical issue (public directory state invalid)."
              conn.sendall(error_msg)
              return
 
-        # Basic sanitization: prevent directory traversal and absolute paths in client request
         if ".." in requested_filename or requested_filename.startswith('/') or requested_filename.startswith('\\'):
             error_msg = b"ERROR: Invalid filename."
             conn.sendall(error_msg)
             print(f"FileServer: Denied invalid filename request: '{requested_filename}'")
             return
 
-        # Construct the full, absolute path to the intended file
-        # os.path.join is important for platform-independent path construction
         prospective_path = os.path.join(self.public_files_dir, requested_filename)
         abs_file_path = os.path.abspath(prospective_path)
 
-        # Security check: Ensure the public_files_dir exists and is a directory
-        # This check is somewhat redundant now given the creation logic above, but kept for safety.
         if not os.path.isdir(self.public_files_dir):
             error_msg = b"ERROR: Server configuration issue (public directory not found)."
             conn.sendall(error_msg)
             print(f"FileServer: Error - Public files directory not found or not a directory: '{self.public_files_dir}'")
             return
             
-        # Security check: Ensure the resolved path is within the self.public_files_dir
-        # Appending os.sep ensures that /publicFilesFoo does not match /publicFiles
         if not abs_file_path.startswith(self.public_files_dir + os.sep) and abs_file_path != self.public_files_dir:
             error_msg = b"ERROR: Access denied."
             conn.sendall(error_msg)
@@ -84,7 +71,6 @@ class FileServer:
                     conn.sendall(chunk)
             print(f"FileServer: Successfully sent file '{abs_file_path}'")
         except IOError as e:
-            # Handle potential I/O errors during file read/send
             print(f"FileServer: IOError sending file '{abs_file_path}': {e}")
             conn.sendall(b"ERROR: Could not read or send file.")
         except Exception as e:
@@ -94,8 +80,8 @@ class FileServer:
     def start_server(self):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((self.host, self.port))
-        self.server.listen(5)  # Allow 5 queued connections
-        self.server.settimeout(1.0)  # Set timeout for non-blocking accept
+        self.server.listen(5)
+        self.server.settimeout(1.0)
         print("Dosya sunucusu başlatıldı...")
         
         self.running = True
@@ -111,7 +97,6 @@ class FileServer:
                 self.send_file(requested_file, conn)
                 conn.close()
             except socket.timeout:
-                # This is just to allow the loop to check self.running periodically
                 continue
             except Exception as e:
                 print(f"Dosya sunucusu hatası: {e}")

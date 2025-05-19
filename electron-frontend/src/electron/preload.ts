@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  sendDownloadRequest: (fileName: string) => ipcRenderer.send('send-download-request', fileName),
-  selectSavePath: (fileName: string) => ipcRenderer.invoke('select-save-path', fileName)
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  sendDownloadRequest: (fileName: string, savePath: string) => ipcRenderer.send('send-download-request', { fileName, savePath }),
 })

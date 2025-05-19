@@ -1,10 +1,8 @@
-#!/usr/bin/env python
 import asyncio
 import websockets
 import sys
 import logging
 
-# Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ if __name__ == "__main__":
     
     # Peer 1'in paylaştığı ve Peer 2'nin indirmesini istediğimiz dosyanın adı.
     # Bu dosyanın Peer 1'in "publicFiles" klasöründe olduğundan emin olun.
-    file_to_request = "asd.xml" 
+    file_to_request = "c.txt" 
     # Eğer publicFiles/asd/asd.txt dosyasını istiyorsanız:
     # file_to_request = "asd.txt" 
 

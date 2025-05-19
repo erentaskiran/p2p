@@ -5,14 +5,15 @@ import fs from 'fs'
 import { WebSocket } from 'ws'
 
 let mainWindow: Electron.BrowserWindow | null = null
-let savePathFromUser: string | null = null
 
 const sharedFolder = path.join(__dirname, '../../python-backend/publicFiles')
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 800,
-    height: 600,
+    height: 800,
+    title: 'P2P Transfer',
+    icon: path.join(__dirname, 'assets/icon.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -25,58 +26,64 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow()
-
-  fs.watch(sharedFolder, (event, filename) => {
-    if (event === 'rename' && filename && savePathFromUser) {
-      const sourceFile = path.join(sharedFolder, filename)
-      const targetFile = savePathFromUser
-
-      if (fs.existsSync(sourceFile)) {
-        fs.copyFile(sourceFile, targetFile, (err) => {
-          if (err) {
-            console.error('❌ Dosya kopyalanamadı:', err)
-          } else {
-            console.log(`✅ ${filename} -> kullanıcı konumuna kopyalandı.`)
-            savePathFromUser = null
-          }
-        })
-      }
-    }
-  })
 })
 
-ipcMain.handle('select-save-path', async (_event, fileName: string) => {
-  const result = await dialog.showSaveDialog({
-    defaultPath: fileName,
-    title: 'Dosyayı Kaydet',
+ipcMain.handle('select-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: 'Klasör Seç',
   })
 
-  if (result.canceled || !result.filePath) return null
-  savePathFromUser = result.filePath
-  return result.filePath
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
 })
 
-ipcMain.on('send-download-request', (_event, fileName: string) => {
+ipcMain.on('send-download-request', async (_event, { fileName, savePath }) => {
   const sourcePath = path.join(sharedFolder, fileName)
 
-  if (fs.existsSync(sourcePath)) {
-    if (savePathFromUser) {
-      fs.copyFile(sourcePath, savePathFromUser, (err) => {
-        if (err) {
-          console.error('❌ Mevcut dosya kopyalanamadı:', err)
-        } else {
-          console.log(`✅ Mevcut dosya ${fileName} direkt kopyalandı.`)
-          savePathFromUser = null
-        }
-      })
-    }
-  } else {
-    const ws = new WebSocket('ws://localhost:8765')
-    ws.on('open', () => {
-      const msg = `receive_file:${fileName}`
-      ws.send(msg)
-      console.log('WebSocket mesajı gönderildi:', msg)
-      ws.close()
+  const copyFile = () => {
+    fs.copyFile(sourcePath, savePath, (err) => {
+      if (err) {
+        console.error(`❌ ${fileName} kopyalanamadı:`, err)
+      } else {
+        console.log(`✅ ${fileName} klasöre kopyalandı: ${savePath}`)
+      }
     })
   }
+  if (fs.existsSync(sourcePath)) {
+    copyFile()
+    return
+  }
+
+  // WebSocket üzerinden dosyayı isteme
+  const ws = new WebSocket('ws://localhost:8765')
+
+  ws.on('open', () => {
+    const msg = `receive_file:${fileName}`
+    ws.send(msg)
+    console.log('📡 WebSocket mesajı gönderildi:', msg)
+    ws.close()
+  })
+
+  ws.on('error', (err) => {
+    console.error(`❌ WebSocket hatası (${fileName}):`, err)
+  })
+
+  const maxRetries = 20
+  const delay = 500
+  let attempts = 0
+
+  const waitForFile = setInterval(() => {
+    if (fs.existsSync(sourcePath)) {
+      clearInterval(waitForFile)
+      console.log(`📁 ${fileName} artık mevcut, kopyalanıyor...`)
+      copyFile()
+    } else {
+      attempts++
+      if (attempts >= maxRetries) {
+        clearInterval(waitForFile)
+        console.error(`❌ ${fileName} belirlenen sürede oluşturulamadı.`)
+      }
+    }
+  }, delay)
 })
